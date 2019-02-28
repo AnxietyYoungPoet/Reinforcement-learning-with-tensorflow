@@ -13,7 +13,11 @@ gym: 0.7.3
 import numpy as np
 import pandas as pd
 import tensorflow as tf
+import matplotlib
+import matplotlib
+matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
+
 
 np.random.seed(1)
 tf.set_random_seed(1)
