@@ -51,11 +51,8 @@ class DeepQNetwork:
     # consist of [target_net, evaluate_net]
     self._build_net()
 
-    t_params = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='target_net')
-    e_params = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='eval_net')
-
     with tf.variable_scope('hard_replacement'):
-      self.target_replace_op = [tf.assign(t, e) for t, e in zip(t_params, e_params)]
+      self.target_replace_op = [tf.assign(t, e) for t, e in zip(self.t_params, self.e_params)]
 
     self.sess = tf.Session()
 
@@ -88,17 +85,20 @@ class DeepQNetwork:
                  bias_initializer=b_initializer, name='t1')
       self.q_next = tf.layers.dense(t1, self.n_actions, kernel_initializer=w_initializer,
                       bias_initializer=b_initializer, name='t2')
+    
+    self.t_params = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='target_net')
+    self.e_params = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='eval_net')
 
     with tf.variable_scope('q_target'):
-      q_target = self.r + self.gamma * tf.reduce_max(self.q_next, axis=1, name='Qmax_s_')  # shape=(None, )
-      self.q_target = tf.stop_gradient(q_target)
+      self.q_target = self.r + self.gamma * tf.reduce_max(self.q_next, axis=1, name='Qmax_s_')  # shape=(None, )
+      # self.q_target = tf.stop_gradient(q_target)
     with tf.variable_scope('q_eval'):
       a_indices = tf.stack([tf.range(tf.shape(self.a)[0], dtype=tf.int32), self.a], axis=1)
       self.q_eval_wrt_a = tf.gather_nd(params=self.q_eval, indices=a_indices)  # shape=(None, )
     with tf.variable_scope('loss'):
       self.loss = tf.reduce_mean(tf.squared_difference(self.q_target, self.q_eval_wrt_a, name='TD_error'))
     with tf.variable_scope('train'):
-      self._train_op = tf.train.RMSPropOptimizer(self.lr).minimize(self.loss)
+      self._train_op = tf.train.RMSPropOptimizer(self.lr).minimize(self.loss, var_list=self.e_params)
 
   def store_transition(self, s, a, r, s_):
     if not hasattr(self, 'memory_counter'):
@@ -125,7 +125,7 @@ class DeepQNetwork:
     # check to replace target parameters
     if self.learn_step_counter % self.replace_target_iter == 0:
       self.sess.run(self.target_replace_op)
-      print('\ntarget_params_replaced\n')
+      print('\ntargeself.t_params_replaced\n')
 
     # sample batch memory from all memory
     if self.memory_counter > self.memory_size:

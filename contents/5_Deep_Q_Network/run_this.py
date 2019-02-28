@@ -39,14 +39,15 @@ def run_maze():
 if __name__ == "__main__":
   # maze game
   env = Maze()
-  RL = DeepQNetwork(env.n_actions, env.n_features,
-            learning_rate=0.01,
-            reward_decay=0.9,
-            e_greedy=0.95,
-            replace_target_iter=200,
-            memory_size=2000,
-            # output_graph=True
-            )
+  RL = DeepQNetwork(
+    env.n_actions, env.n_features,
+    learning_rate=0.01,
+    reward_decay=0.9,
+    e_greedy=0.95,
+    replace_target_iter=200,
+    memory_size=2000,
+    # output_graph=True
+  )
   env.after(100, run_maze)
   env.mainloop()
   print('main loop over')
