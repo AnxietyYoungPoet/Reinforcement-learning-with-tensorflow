@@ -24,7 +24,7 @@ class DeepQNetwork:
       n_features,
       learning_rate=0.01,
       reward_decay=0.9,
-      e_greedy=0.9,
+      e_greedy=0.95,
       replace_target_iter=300,
       memory_size=500,
       batch_size=32,
