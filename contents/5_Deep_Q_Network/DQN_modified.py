@@ -150,6 +150,8 @@ class DeepQNetwork:
         self.learn_step_counter += 1
 
     def plot_cost(self):
+        import matplotlib
+        matplotlib.use('TkAgg')
         import matplotlib.pyplot as plt
         plt.plot(np.arange(len(self.cost_his)), self.cost_his)
         plt.ylabel('Cost')
