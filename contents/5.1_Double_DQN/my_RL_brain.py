@@ -30,6 +30,7 @@ class DoubleDQN:
       output_graph=False,
       double_q=True,
       sess=None,
+      scope=''
   ):
     self.n_actions = n_actions
     self.n_features = n_features
@@ -41,15 +42,14 @@ class DoubleDQN:
     self.batch_size = batch_size
     self.epsilon_increment = e_greedy_increment
     self.epsilon = 0 if e_greedy_increment is not None else self.epsilon_max
+    self.scope = scope
 
     self.double_q = double_q  # decide to use double q or not
 
     self.learn_step_counter = 0
     self.memory = np.zeros((self.memory_size, n_features*2+2))
     self._build_net()
-    t_params = tf.get_collection('target_net_params')
-    e_params = tf.get_collection('eval_net_params')
-    self.replace_target_op = [tf.assign(t, e) for t, e in zip(t_params, e_params)]
+    self.replace_target_op = [tf.assign(t, e) for t, e in zip(self.t_params, self.e_params)]
 
     if sess is None:
       self.sess = tf.Session()
@@ -61,39 +61,37 @@ class DoubleDQN:
     self.cost_his = []
 
   def _build_net(self):
-    def build_layers(s, c_names, n_l1, w_initializer, b_initializer):
-      with tf.variable_scope('l1'):
-        w1 = tf.get_variable('w1', [self.n_features, n_l1], initializer=w_initializer, collections=c_names)
-        b1 = tf.get_variable('b1', [1, n_l1], initializer=b_initializer, collections=c_names)
-        l1 = tf.nn.relu(tf.matmul(s, w1) + b1)
+    self.s = tf.placeholder(tf.float32, [None, self.n_features], name='s')
+    self.q_target = tf.placeholder(tf.float32, [None, ], name='q_target')
+    self.r = tf.placeholder(tf.float32, [None, ], name='r')
+    self.a = tf.placeholder(tf.int32, [None, ], name='a')
 
-      with tf.variable_scope('l2'):
-        w2 = tf.get_variable('w2', [n_l1, self.n_actions], initializer=w_initializer, collections=c_names)
-        b2 = tf.get_variable('b2', [1, self.n_actions], initializer=b_initializer, collections=c_names)
-        out = tf.matmul(l1, w2) + b2
-      return out
-    # ------------------ build evaluate_net ------------------
-    self.s = tf.placeholder(tf.float32, [None, self.n_features], name='s')  # input
-    self.q_target = tf.placeholder(tf.float32, [None, self.n_actions], name='Q_target')  # for calculating loss
+    w_initializer, b_initializer = tf.keras.initializers.he_normal(), tf.constant_initializer(0.1)
+    with tf.variable_scope(self.scope + 'eval_net'):
+      e1 = tf.layers.dense(self.s, 32, tf.nn.relu, kernel_initializer=w_initializer,
+        bias_initializer=b_initializer, name='e1')
+      self.q_eval_all = tf.layers.dense(e1, self.n_actions, kernel_initializer=w_initializer,
+        bias_initializer=b_initializer, name='q_eval_all')
+    
+    with tf.variable_scope(self.scope + 'target_net'):
+      t1 = tf.layers.dense(self.s, 32, tf.nn.relu, kernel_initializer=w_initializer,
+        bias_initializer=b_initializer, name='t1')
+      self.q_target_all = tf.layers.dense(t1, self.n_actions, kernel_initializer=w_initializer,
+        bias_initializer=b_initializer, name='q_target_all')
+    
+    self.t_params = tf.get_collection(
+      tf.GraphKeys.GLOBAL_VARIABLES, scope=self.scope + 'target_net')
+    self.e_params = tf.get_collection(
+      tf.GraphKeys.GLOBAL_VARIABLES, scope=self.scope + 'eval_net')
 
-    with tf.variable_scope('eval_net'):
-      c_names, n_l1, w_initializer, b_initializer = \
-        ['eval_net_params', tf.GraphKeys.GLOBAL_VARIABLES], 20, \
-        tf.random_normal_initializer(0., 0.3), tf.constant_initializer(0.1)  # config of layers
-
-      self.q_eval = build_layers(self.s, c_names, n_l1, w_initializer, b_initializer)
-
+      # self.q_target = tf.stop_gradient(q_target)
+    with tf.variable_scope('q_eval'):
+      a_indices = tf.stack([tf.range(tf.shape(self.a)[0], dtype=tf.int32), self.a], axis=1)
+      self.q_eval_wrt_a = tf.gather_nd(params=self.q_eval_all, indices=a_indices)  # shape=(None, )
     with tf.variable_scope('loss'):
-      self.loss = tf.reduce_mean(tf.squared_difference(self.q_target, self.q_eval))
+      self.loss = tf.reduce_mean(tf.squared_difference(self.q_target, self.q_eval_wrt_a, name='TD_error'))
     with tf.variable_scope('train'):
-      self._train_op = tf.train.RMSPropOptimizer(self.lr).minimize(self.loss)
-
-    # ------------------ build target_net ------------------
-    self.s_ = tf.placeholder(tf.float32, [None, self.n_features], name='s_')  # input
-    with tf.variable_scope('target_net'):
-      c_names = ['target_net_params', tf.GraphKeys.GLOBAL_VARIABLES]
-
-      self.q_next = build_layers(self.s_, c_names, n_l1, w_initializer, b_initializer)
+      self._train_op = tf.train.RMSPropOptimizer(self.lr).minimize(self.loss, var_list=self.e_params)
 
   def store_transition(self, s, a, r, s_):
     if not hasattr(self, 'memory_counter'):
@@ -105,7 +103,7 @@ class DoubleDQN:
 
   def choose_action(self, observation):
     observation = observation[np.newaxis, :]
-    actions_value = self.sess.run(self.q_eval, feed_dict={self.s: observation})
+    actions_value = self.sess.run(self.q_eval_all, feed_dict={self.s: observation})
     action = np.argmax(actions_value)
 
     if not hasattr(self, 'q'):  # record action value it gets
@@ -129,29 +127,28 @@ class DoubleDQN:
       sample_index = np.random.choice(self.memory_counter, size=self.batch_size)
     batch_memory = self.memory[sample_index, :]
 
-    q_next, q_eval4next = self.sess.run(
-      [self.q_next, self.q_eval],
-      feed_dict={self.s_: batch_memory[:, -self.n_features:],  # next observation
-             self.s: batch_memory[:, -self.n_features:]})  # next observation
-    q_eval = self.sess.run(self.q_eval, {self.s: batch_memory[:, :self.n_features]})
-
-    q_target = q_eval.copy()
+    q_next_eval, q_next_target = self.sess.run(
+      [self.q_eval_all, self.q_target_all],
+      feed_dict={self.s:batch_memory[:, -self.n_features:]}
+    )
 
     batch_index = np.arange(self.batch_size, dtype=np.int32)
     eval_act_index = batch_memory[:, self.n_features].astype(int)
     reward = batch_memory[:, self.n_features + 1]
 
     if self.double_q:
-      max_act4next = np.argmax(q_eval4next, axis=1)    # the action that brings the highest value is evaluated by q_eval
-      selected_q_next = q_next[batch_index, max_act4next]  # Double DQN, select q_next depending on above actions
+      max_act4next = np.argmax(q_next_eval, axis=1)    # the action that brings the highest value is evaluated by q_eval
+      selected_q_next = q_next_target[batch_index, max_act4next]  # Double DQN, select q_next depending on above actions
     else:
-      selected_q_next = np.max(q_next, axis=1)  # the natural DQN
+      selected_q_next = np.max(q_next_target, axis=1)  # the natural DQN
 
-    q_target[batch_index, eval_act_index] = reward + self.gamma * selected_q_next
+    q_target = reward + self.gamma * selected_q_next
 
-    _, self.cost = self.sess.run([self._train_op, self.loss],
-                   feed_dict={self.s: batch_memory[:, :self.n_features],
-                        self.q_target: q_target})
+    _, self.cost = self.sess.run(
+      [self._train_op, self.loss],
+      feed_dict={self.s: batch_memory[:, :self.n_features],
+                 self.q_target: q_target,
+                 self.a: eval_act_index})
     self.cost_his.append(self.cost)
 
     self.epsilon = self.epsilon + self.epsilon_increment if self.epsilon < self.epsilon_max else self.epsilon_max

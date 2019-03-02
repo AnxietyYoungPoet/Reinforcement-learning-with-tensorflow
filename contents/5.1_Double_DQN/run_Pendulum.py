@@ -11,8 +11,10 @@ gym: 0.8.0
 
 
 import gym
-from RL_brain import DoubleDQN
+from my_RL_brain import DoubleDQN
 import numpy as np
+import matplotlib
+matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 import tensorflow as tf
 
@@ -23,19 +25,19 @@ env.seed(1)
 MEMORY_SIZE = 3000
 ACTION_SPACE = 11
 
-sess = tf.Session()
-with tf.variable_scope('Natural_DQN'):
-    natural_DQN = DoubleDQN(
-        n_actions=ACTION_SPACE, n_features=3, memory_size=MEMORY_SIZE,
-        e_greedy_increment=0.001, double_q=False, sess=sess
-    )
+# sess = tf.Session()
+# with tf.variable_scope('Natural_DQN'):
+natural_DQN = DoubleDQN(
+    n_actions=ACTION_SPACE, n_features=3, memory_size=MEMORY_SIZE,
+    e_greedy_increment=0.001, double_q=False, scope='Vanilla'
+)
 
-with tf.variable_scope('Double_DQN'):
-    double_DQN = DoubleDQN(
-        n_actions=ACTION_SPACE, n_features=3, memory_size=MEMORY_SIZE,
-        e_greedy_increment=0.001, double_q=True, sess=sess, output_graph=True)
+# with tf.variable_scope('Double_DQN'):
+double_DQN = DoubleDQN(
+    n_actions=ACTION_SPACE, n_features=3, memory_size=MEMORY_SIZE,
+    e_greedy_increment=0.001, double_q=True, scope='DoubleQ')
 
-sess.run(tf.global_variables_initializer())
+# sess.run(tf.global_variables_initializer())
 
 
 def train(RL):
